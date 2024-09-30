@@ -1,7 +1,6 @@
 require "jit_buffer"
 require "tenderjit/fiddle_hacks"
 require "tenderjit/compiler/context"
-require "tenderjit/compiler/opt_aset"
 require "tenderjit/deferred_compiler"
 require "tenderjit/ir"
 require "tenderjit/yarv"
@@ -11,16 +10,18 @@ class TenderJIT
     include RubyVM::RJIT
 
     def self.for_method method
+      raise TypeError unless Method === method
       rb_iseq = RubyVM::InstructionSequence.of(method)
       return unless rb_iseq # it's a C func
-      new method_to_iseq_t(rb_iseq)
+      new method_to_iseq_t(method)
     end
 
     def self.uncompile method
+      raise TypeError unless Method === method
       rb_iseq = RubyVM::InstructionSequence.of(method)
       return unless rb_iseq # it's a C func
 
-      iseq = method_to_iseq_t(rb_iseq)
+      iseq = method_to_iseq_t(method)
       cov_ptr = iseq.body.variable.coverage.to_i
 
       unless cov_ptr == 0 || cov_ptr == Fiddle::Qnil
@@ -31,39 +32,48 @@ class TenderJIT
     end
 
     def self.method_to_iseq_t method
-      addr = Fiddle.dlwrap(method)
+      if Method === method
+        iseq_obj = RubyVM::InstructionSequence.of(method)
+        return if method.nil?
+      else
+        raise unless method.is_a?(RubyVM::InstructionSequence)
+        iseq_obj = method
+      end
+      addr = Fiddle.dlwrap(iseq_obj)
       offset = Hacks::STRUCTS["RTypedData"]["data"][0]
       addr = Fiddle.read_ptr addr, offset
-      C.rb_iseq_t.new addr
+      ret = C.rb_iseq_t.new addr
+      ret
     end
 
-    def self.new iseq
-      cov_ptr = iseq.body.variable.coverage.to_i
+     def self.new iseq
+       raise ArgumentError unless iseq.respond_to?(:body)
+       cov_ptr = iseq.body.variable.coverage.to_i
 
-      ary = nil
-      if cov_ptr == 0 || cov_ptr == Fiddle::Qnil
-        ary = []
-        ary_addr = Fiddle.dlwrap(ary)
-        iseq.body.variable.coverage = ary_addr
-        Hacks.rb_gc_writebarrier(iseq, ary_addr)
-      else
-        ary = Fiddle.dlunwrap(iseq.body.variable.coverage)
-      end
+       ary = nil
+       if cov_ptr == 0 || cov_ptr == Fiddle::Qnil || true
+         ary = []
+         ary_addr = Fiddle.dlwrap(ary)
+         iseq.body.variable.coverage = ary_addr
+         Hacks.rb_gc_writebarrier(iseq, ary_addr)
+       else
+         ary = Fiddle.dlunwrap(iseq.body.variable.coverage)
+       end
 
-      # COVERAGE_INDEX_LINES is 0
-      # COVERAGE_INDEX_BRANCHES is 1
-      # 2 is unused so we'll use it. :D
+       # COVERAGE_INDEX_LINES is 0
+       # COVERAGE_INDEX_BRANCHES is 1
+       # 2 is unused so we'll use it. :D
 
-      # Cache the iseq compiler for this iseq inside the code coverage array.
-      if ary[2]
-        puts "this shouldn't happen, I don't think"
-      else
-        iseq_compiler = super
-        ary[2] = iseq_compiler
-      end
+       # Cache the iseq compiler for this iseq inside the code coverage array.
+       if ary[2]
+         puts "this shouldn't happen, I don't think"
+       else
+         iseq_compiler = super
+         ary[2] = iseq_compiler
+       end
 
-      ary[2]
-    end
+       ary[2]
+     end
 
     UINTPTR_MAX = 0xFFFFFFFFFFFFFFFF
     RBIMPL_VALUE_FULL = UINTPTR_MAX
@@ -265,9 +275,13 @@ class TenderJIT
       end
     end
 
-    attr_reader :iseq, :buff
+    attr_reader :iseq, :buff, :yarv, :yarv_labels, :deferred_compiler, :patches
 
+    # @param iseq Iseq Internal object
     def initialize iseq
+      unless iseq.class.name =~ /Struct_rb_iseq_struct/
+        raise ArgumentError
+      end
       @iseq = iseq
       @trampolines = JITBuffer.new 4096
       @buff = JITBuffer.new 4096
@@ -278,16 +292,22 @@ class TenderJIT
       @patches = []
       @patch_id = 0
       @deferred_compiler = DeferredCompiler.new(@buff)
+      @yarv = nil
     end
 
     def yarv
+      return @yarv if @yarv
       yarv_ir(@iseq)
+      @yarv
     end
+    alias build_yarv yarv
 
     def compile comptime_frame
       # method name
-      label = iseq.body.location.label
-      puts "COMPILING #{label}" if $DEBUG
+      if DEBUG
+        label = @iseq.body.location.label
+        puts "COMPILING #{label}"
+      end
 
       STATS.compiled_methods += 1
 
@@ -298,7 +318,7 @@ class TenderJIT
 
       ec = ir.copy ec
 
-      ctx = Context.new(buff, ec, cfp, comptime_frame)
+      ctx = Context.new(@buff, ec, cfp, comptime_frame)
 
       # Increment executed method count
       stats_location = ir.loadi(STATS.to_i)
@@ -307,7 +327,8 @@ class TenderJIT
       ir.store(inc, stats_location, ir.uimm(Stats.offsetof("executed_methods")))
       ir.store(ir.copy(ir.loadsp), stats_location, ir.uimm(Stats.offsetof("entry_sp")))
 
-      cfg = yarv.basic_blocks
+      build_yarv unless @yarv
+      cfg = @yarv.basic_blocks
 
       translate_cfg cfg, ir, ctx
       asm = ir.assemble
@@ -315,11 +336,13 @@ class TenderJIT
       buff.writeable!
       asm.write_to buff
 
-      disasm buff if $DEBUG
+      disasm buff if DEBUG
 
       buff.executable!
 
-      puts "DONE COMPILING #{label}" if $DEBUG
+      if DEBUG
+        puts "DONE COMPILING #{label}"
+      end
       buff.to_i
     end
 
@@ -395,7 +418,7 @@ class TenderJIT
 
     def translate_block block, ir, context
       block.each_instruction do |insn|
-        puts insn.op if $DEBUG
+        puts insn.op if DEBUG
         if insn.op == :send
           raise
         else
@@ -431,19 +454,19 @@ class TenderJIT
 
       locals = list.map { Hacks.rb_id2sym _1 }
 
-      yarv = YARV.new iseq, locals
+      @yarv = YARV.new iseq, locals
 
       while jit_pc < iseq_size
         addr = iseq_buf.to_i + (jit_pc * Fiddle::SIZEOF_VOIDP)
         insn = INSNS.fetch C.rb_vm_insn_decode(Fiddle.read_ptr(addr, 0))
-        yarv.handle addr, insn
+        @yarv.handle addr, insn
 
         jit_pc += insn.len
       end
 
-      yarv.peephole_optimize!
+      @yarv.peephole_optimize!
 
-      yarv
+      @yarv
     end
 
     def gen_iv_read recv, patch_id
@@ -1335,7 +1358,7 @@ class TenderJIT
       # Move the stack pointer forward enough that the callee won't
       # interfere with the caller's stack, just in case the caller had to write
       # to the stack
-      sp = ir.load(caller_cfp, C.rb_control_frame_t.offsetof(:__bp__))
+      #sp = ir.load(caller_cfp, C.rb_control_frame_t.offsetof(:__bp__))
       sp = ir.add(sp, ctx.stack.stack_depth_b)
 
       # add enough room to the SP to write magic EP values
@@ -1346,7 +1369,7 @@ class TenderJIT
 
       callee_cfp = ir.sub(caller_cfp, C.rb_control_frame_t.size)
       ir.store(sp, callee_cfp, C.rb_control_frame_t.offsetof(:sp))
-      ir.store(sp, callee_cfp, C.rb_control_frame_t.offsetof(:__bp__))
+      #ir.store(sp, callee_cfp, C.rb_control_frame_t.offsetof(:__bp__))
       ir.store(
         ir.sub(sp, C.VALUE.size),
         callee_cfp, C.rb_control_frame_t.offsetof(:ep)

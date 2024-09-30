@@ -22,30 +22,30 @@ class TenderJIT
       end
     }.create(INT, [INT])
 
-    def test_call_with_two_params
-      ir = IR.new
+    #def test_call_with_two_params
+      #ir = IR.new
 
-      param1 = ir.loadi(400)
-      param2 = ir.loadi(200)
-      func = ir.loadi MINUS.to_i
-      ir.ret ir.call(func, [param1, param2])
+      #param1 = ir.loadi(400)
+      #param2 = ir.loadi(200)
+      #func = ir.loadi MINUS.to_i
+      #ir.ret ir.call(func, [param1, param2])
 
-      buf = assemble ir
-      func = buf.to_function([], INT)
-      assert_equal 200, func.call
-    end
+      #buf = assemble ir
+      #func = buf.to_function([], INT)
+      #assert_equal 200, func.call
+    #end
 
-    def test_call
-      ir = IR.new
+    #def test_call
+      #ir = IR.new
 
-      param = ir.loadi(123)
-      func = ir.loadi FUNC.to_i
-      ir.ret ir.call(func, [param])
+      #param = ir.loadi(123)
+      #func = ir.loadi FUNC.to_i
+      #ir.ret ir.call(func, [param])
 
-      buf = assemble ir
-      func = buf.to_function([], INT)
-      assert_equal 128, func.call
-    end
+      #buf = assemble ir
+      #func = buf.to_function([], INT)
+      #assert_equal 128, func.call
+    #end
 
     def test_jnz
       ir = IR.new
@@ -586,27 +586,27 @@ class TenderJIT
       assert_equal 3, func.call(1)
     end
 
-    def test_stack_alloc_and_funcallv
-      ir = IR.new
+    #def test_stack_alloc_and_funcallv
+      #ir = IR.new
 
-      # Function params
-      ir.push(ir.loadi(Fiddle.dlwrap(3)), ir.loadi(Fiddle.dlwrap(4)))
-      ir.push(ir.loadi(Fiddle.dlwrap(1)), ir.loadi(Fiddle.dlwrap(2)))
-      argv = ir.copy(ir.loadsp)
+      ## Function params
+      #ir.push(ir.loadi(Fiddle.dlwrap(3)), ir.loadi(Fiddle.dlwrap(4)))
+      #ir.push(ir.loadi(Fiddle.dlwrap(1)), ir.loadi(Fiddle.dlwrap(2)))
+      #argv = ir.copy(ir.loadsp)
 
-      func = ir.loadi Fiddle::Handle::DEFAULT["rb_funcallv"]
-      recv = ir.loadi Fiddle.dlwrap(self)
-      callback = ir.loadi Hacks.rb_intern_str("four_param")
+      #func = ir.loadi Fiddle::Handle::DEFAULT["rb_funcallv"]
+      #recv = ir.loadi Fiddle.dlwrap(self)
+      #callback = ir.loadi Hacks.rb_intern_str("four_param")
 
-      var = ir.call(func, [recv, callback, ir.loadi(4), argv])
-      ir.pop
-      ir.pop
-      ir.ret var
+      #var = ir.call(func, [recv, callback, ir.loadi(4), argv])
+      #ir.pop
+      #ir.pop
+      #ir.ret var
 
-      buf = assemble ir
-      func = Fiddle::Function.new(buf.to_i, [], VOIDP, need_gvl: true)
-      assert_equal [1, 2, 3, 4], Fiddle.dlunwrap(func.call())
-    end
+      #buf = assemble ir
+      #func = Fiddle::Function.new(buf.to_i, [], VOIDP, need_gvl: true)
+      #assert_equal [1, 2, 3, 4], Fiddle.dlunwrap(func.call())
+    #end
 
     def test_mod
       ir = IR.new

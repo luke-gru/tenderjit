@@ -159,7 +159,11 @@ class TenderJIT
       def loadp out, offset, _
       end
 
-      def loadsp _, _, _
+      # added
+      def storep reg, val, _
+      end
+
+      def loadsp out, val, _
       end
 
       def copy out, val, _
@@ -183,8 +187,14 @@ class TenderJIT
           asm.mov dest.pr, in1.pr
         end
 
-        asm.shl dest.pr, asm.uimm(1)
+        asm.shl dest.pr, asm.uimm(1) # <<
         asm.or dest.pr, asm.uimm(1)
+      end
+
+      # Added, not sure if right
+      def num2int dest, in1, _
+        asm.mov dest.pr, in1.pr
+        asm.shr dest.pr, asm.uimm(1) # >>
       end
 
       def storei out, val, _
@@ -216,6 +226,13 @@ class TenderJIT
 
         @asm.cmp arg1, arg2
         @asm.jle asm.label(dest.pr)
+      end
+
+      # added, not sure if right
+      def jz dest, arg1, _
+        arg1 = _unwrap(arg1)
+        asm.test arg1, @asm.uimm(0)
+        asm.jz @asm.label(dest.pr)
       end
 
       def jmp dest, _, _
@@ -253,6 +270,11 @@ class TenderJIT
 
       def cmp _, in1, in2
         asm.cmp in1.pr, in2.pr
+      end
+
+      # added, tbd
+      def mul dest, arg1, arg2
+        binding.irb
       end
 
       def tbnz dest, arg1, arg2

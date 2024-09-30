@@ -5,15 +5,15 @@ class TenderJIT
     class Printer
       class Highlighter
         def self.even
-          "\033[30;0;0m"
+          ""
         end
 
         def self.odd
-          "\033[30;0;107m"
+          ""
         end
 
         def self.endline
-          "\033[0m"
+          ""
         end
       end
 

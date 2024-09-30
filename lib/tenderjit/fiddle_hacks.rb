@@ -24,7 +24,9 @@ module Fiddle
   end
 
   def self.read_ptr ptr, offset
-    Fiddle::Pointer.new(ptr)[offset, Fiddle::SIZEOF_VOIDP].unpack1("l!")
+    ret = Fiddle::Pointer.new(ptr)
+    ret = ret[offset, Fiddle::SIZEOF_VOIDP]
+    ret.unpack1("l!")
   end
 
   def self.write_ptr ptr, offset, val

@@ -1,0 +1,46 @@
+NOTES
+=====
+
+Run 1 test:
+  ruby -v #=> 3.3.5
+  RUBYOPT="--rjit" TENDERJIT_DEBUG=1 TEST_SUITE_PREFIX=dup bundle exec rake test
+
+Passing tests:
+dup
+leave
+jump
+
+Crashing tests:
+duparray
+
+Old tests:
+getglobal
+
+TenderJIT#compile:
+1) compile method(:foo)
+
+2) @jit = Tenderjit.new
+  *@jit.compile(method(:foo))
+
+3) iseq = RubyVM::ISeq.of(method)
+   iseq_internal = Compiler.method_to_iseq_t(method)
+   compiler = TenderJIT::Compiler.new(iseq_internal)
+   cfp = C.rb_control_frame.new
+  *jit_addr = compiler.compile(cfp)
+
+4) yarv_ir(iseq_i)
+     Yarv.new(iseq_i, locals) # now append to @yarv.@instructions
+     ~ foreach addr in iseq_i.insn_addrs
+       ~ insn = INSNS.fetch(...) 
+       * yarv.handle(addr, insn)
+
+5) getlocal_WC_0(addr, insn)
+     add_insn :getlocal
+       new_insn
+         Instruction.new(name, pcs, insn, opnds)
+       @instructions.append(insn)
+       / yarv.handle, @yarv.@instructions now full
+
+6) cfg = @yarv.basic_blocks
+     BasicBlock.build @insn_head, self, false
+  

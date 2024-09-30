@@ -38,7 +38,7 @@ class TenderJIT
     end
 
     def test_fib
-      jit.compile method(:fib)
+      compile method(:fib)
       assert_equal 1, jit.compiled_methods
       assert_equal 0, jit.executed_methods
       assert_equal 0, jit.exits
@@ -62,7 +62,7 @@ class TenderJIT
     end
 
     def test_recursive
-      jit.compile method(:cool)
+      compile method(:cool)
       assert_equal 1, jit.compiled_methods
       assert_equal 0, jit.executed_methods
       assert_equal 0, jit.exits
@@ -84,7 +84,7 @@ class TenderJIT
     end
 
     def test_compile_adds_codeblock
-      jit.compile method(:lt_true)
+      compile method(:lt_true)
       cbs = jit.code_blocks(method(:lt_true))
       assert_operator cbs.length, :>, 0
     ensure
@@ -92,7 +92,7 @@ class TenderJIT
     end
 
     def test_uncompile_removes_codeblocks
-      jit.compile method(:lt_true)
+      compile method(:lt_true)
       cbs = jit.code_blocks(method(:lt_true))
       assert_operator cbs.length, :>, 0
       jit.uncompile method(:lt_true)
@@ -117,8 +117,8 @@ class TenderJIT
     end
 
     def test_compile_two_methods
-      jit.compile method(:simple)
-      jit.compile method(:putself)
+      compile method(:simple)
+      compile method(:putself)
       assert_equal 2, jit.compiled_methods
       assert_equal 0, jit.executed_methods
 
@@ -145,7 +145,7 @@ class TenderJIT
     end
 
     def test_funcall_with_splat
-      jit.compile method(:call_with_block)
+      compile method(:call_with_block)
       assert_equal 1, jit.compiled_methods
       assert_equal 0, jit.executed_methods
       assert_equal 0, jit.exits
@@ -169,7 +169,7 @@ class TenderJIT
     end
 
     def test_special_methods_do_not_break
-      jit.compile Foo.instance_method(:tap)
+      compile Foo.instance_method(:tap)
       assert_equal 1, jit.compiled_methods
 
       jit.enable!
@@ -192,10 +192,10 @@ class TenderJIT
 
     def xtest_it_does_not_crash
       pid = fork {
-        jit.compile(jit.method(:compile))
+        compile(jit.method(:compile))
         6.times do
           jit.enable!
-          jit.compile(method(:fib))
+          compile(method(:fib))
           jit.disable!
         end
 

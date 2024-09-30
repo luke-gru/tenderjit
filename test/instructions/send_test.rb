@@ -13,7 +13,7 @@ class TenderJIT
     end
 
     def test_send_with_block
-      jit.compile(method(:foo))
+      compile(method(:foo))
       jit.enable!
       v = foo
       jit.disable!
@@ -32,7 +32,7 @@ class TenderJIT
     end
 
     def test_send_with_block_yields
-      jit.compile(method(:foor))
+      compile(method(:foor))
       jit.enable!
       v = foor
       jit.disable!
@@ -54,8 +54,8 @@ class TenderJIT
     end
 
     def test_block_params_work
-      jit.compile(method(:gimme))
-      jit.compile(method(:return_gimme))
+      compile(method(:gimme))
+      compile(method(:return_gimme))
 
       expected = return_gimme
       jit.enable!
@@ -74,8 +74,8 @@ class TenderJIT
     # Test that the block will be called and we return the original value
     # of the `gimme` method
     def test_only_gimme
-      jit.compile(method(:gimme))
-      jit.compile(method(:only_gimme))
+      compile(method(:gimme))
+      compile(method(:only_gimme))
 
       expected = return_gimme
       jit.enable!
@@ -117,7 +117,7 @@ class TenderJIT
     def test_block_takes_block
       expected = block_takes_iseq_block { |_, &blk| blk.call }
 
-      jit.compile(method(:block_takes_iseq_block))
+      compile(method(:block_takes_iseq_block))
 
       jit.enable!
       actual = block_takes_iseq_block { |_, &blk| blk.call }
@@ -135,7 +135,7 @@ class TenderJIT
     def test_block_takes_sym_block
       expected = block_takes_sym_block { |&blk| blk }
 
-      jit.compile(method(:block_takes_sym_block))
+      compile(method(:block_takes_sym_block))
 
       jit.enable!
       actual = block_takes_sym_block { |&blk| blk }

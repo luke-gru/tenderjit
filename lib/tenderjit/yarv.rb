@@ -104,6 +104,8 @@ class TenderJIT
       end
     end
 
+    attr_reader :insn_head, :instructions, :label_map, :locals, :local_names
+
     def initialize iseq, locals
       @insn_head = LinkedList::Head.new
       @instructions = @insn_head
@@ -116,6 +118,7 @@ class TenderJIT
       BasicBlock.build @insn_head, self, false
     end
 
+    require "ruby_vm/rjit/instruction"
     JUMP = RubyVM::RJIT::INSNS.values.find { |insn| insn.name == :jump }
 
     def insert_jump node, label
@@ -140,6 +143,13 @@ class TenderJIT
 
     EMPTY = [].freeze
 
+    # @param pc Integer (addr)
+    # @param insn
+    #   <data RubyVM::RJIT::Instruction
+    #    name=:getlocal_WC_0,
+    #    bin=96,
+    #    len=2,
+    #    operands=[{:decl=>"lindex_t idx", :type=>"lindex_t", :name=>"idx"}]>
     def handle pc, insn
       if label = @label_map[pc]
         put_label pc, label

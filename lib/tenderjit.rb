@@ -1,4 +1,17 @@
 # frozen_string_literal: true
+#
+class TenderJIT
+  begin
+    C = RubyVM::RJIT.const_get(:C)
+  rescue NameError
+    $stderr.puts "make sure to give RUBYOPTS='--rjit', otherwise tenderjit won't work!"
+    exit! 1
+  ensure
+    # turn off rjit
+    C.rjit_cancel_all("because") if defined?(TenderJIT::C)
+  end
+  DEBUG = ENV['TENDERJIT_DEBUG'] ? ENV['TENDERJIT_DEBUG'].to_i != 0 : false
+end
 
 require "tenderjit/fiddle_hacks"
 require "tenderjit/c_funcs"
@@ -8,9 +21,11 @@ require "fiddle/import"
 require "hacks"
 require "hatstone"
 require "etc"
+require "ruby_vm/rjit/c_type"
+require "ruby_vm/rjit/c_pointer"
+require "ruby_vm/rjit/compiler"
 
 class TenderJIT
-  C = RubyVM::RJIT.const_get(:C)
   INSNS = RubyVM::RJIT.const_get(:INSNS)
 
   extend Fiddle::Importer
@@ -51,23 +66,27 @@ class TenderJIT
   end
 
   # Entry point for compiling a method from RJIT hooks
-  def compile iseq, cfp
-    return if iseq.body.jit_entry != 0
+  def compile method, cfp = C.rb_control_frame_t.new
+    iseq = RubyVM::InstructionSequence.of(method)
+    return if iseq.nil? # c method
 
-    compiler = TenderJIT::Compiler.new iseq
+    iseq_internal = Compiler.method_to_iseq_t(method)
+    if iseq_internal.nil?
+      raise ArgumentError, "expected non-nil"
+    end
+    compiler = TenderJIT::Compiler.new iseq_internal
     jit_addr = compiler.compile cfp
 
     @compiled_iseq_addrs << compiler.iseq.to_i
-    iseq.body.jit_entry = jit_addr
+    iseq_internal.body.jit_entry = jit_addr
   end
 
   # Compile a method.  For example:
   def compile_method method, recv:
-    rb_iseq = RubyVM::InstructionSequence.of(method)
-    method = Compiler.method_to_iseq_t rb_iseq
+    iseq_internal = Compiler.method_to_iseq_t(method)
     cfp = C.rb_control_frame_t.new
     cfp.self = Fiddle.dlwrap(recv)
-    compile method, cfp
+    compile iseq_internal, cfp
   ensure
     Fiddle.free cfp.to_i
   end

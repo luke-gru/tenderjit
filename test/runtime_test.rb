@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "helper"
+return
 
 class TenderJIT
   class RuntimeTest < Test

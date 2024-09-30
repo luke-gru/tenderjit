@@ -124,7 +124,7 @@ class TenderJIT
       stack = simplify ig, live_ranges, color_map
       spills = select ig, stack, color_map
 
-      if $DEBUG
+      if DEBUG
         File.binwrite("if_graph.#{counter}.dot", ig.to_dot("Interference Graph #{counter}", color_map))
         File.binwrite("cfg.#{counter}.dot", BasicBlock::Printer.new(bbs).to_dot)
       end

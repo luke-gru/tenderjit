@@ -52,6 +52,7 @@ task open_pdf: grouped_pdfs.map { |x| x + ".pdf" } + non_grouped do |t|
 end
 
 task :pdf => :open_pdf
+task :default => :test
 
 CLEAN.include FileList['*.dot']
 CLEAN.include FileList['*.pdf']
@@ -71,9 +72,9 @@ CLEAN.include FileList['*.dot'].ext('.dot.pdf')
 #   defaults to run all the UTs.
 #   example: `empty_array` will run `test_empty_array`
 #
-task :test, [:test_suite_prefix, :test_bare_name] => test_files + [:compile] do |_, args|
+task :test, [:test_suite_prefix, :test_bare_name] => test_files do |_, args|
   Rake::TestTask.new do |t|
-    test_suite_prefix = args.test_suite_prefix || TEST_SUITE_DEFAULT_PREFIX
+    test_suite_prefix = ENV['TEST_SUITE_PREFIX'] || args.test_suite_prefix || TEST_SUITE_DEFAULT_PREFIX
 
     t.libs << "test"
     t.test_files = FileList["test/**/#{test_suite_prefix}_test.rb"]
@@ -81,9 +82,10 @@ task :test, [:test_suite_prefix, :test_bare_name] => test_files + [:compile] do 
     # This is somewhat hacky, but TestTask doesn't leave many... options 😬
     # See source (`rake-$version/lib/rake/testtask.rb`).
     #
-    t.options = "-ntest_#{args.test_bare_name}" if args.test_bare_name
+    if args.test_bare_name
+      t.options = "-ntest_#{args.test_bare_name}"
+    end
 
-    t.verbose = true
     t.warning = true
   end
 end
