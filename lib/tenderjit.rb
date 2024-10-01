@@ -40,7 +40,8 @@ class TenderJIT
 
   STATS = Stats.malloc(Fiddle::RUBY_FREE)
 
-  def self.disasm buf
+  def self.disasm buf, metadata: {}
+    comments_map = metadata[:comments] || {}
     hs = case Util::PLATFORM
          when :arm64
            Hatstone.new(Hatstone::ARCH_ARM64, Hatstone::MODE_ARM)
@@ -52,16 +53,24 @@ class TenderJIT
 
     # Now disassemble the instructions with Hatstone
     hs.disasm(buf[0, buf.pos], buf.to_i).each do |insn|
+      # insn: Hatstone::Insn
+      offset = insn.address - buf.to_i
+      if message = comments_map[offset]
+        puts "# " + message
+      end
       puts "%#05x %s %s" % [insn.address, insn.mnemonic, insn.op_str]
     end
   end
 
+  attr_reader :stats
+
   def initialize
-    @stats = STATS
+    @stats = Stats.malloc(Fiddle::RUBY_FREE)
     @stats.compiled_methods = 0
     @stats.executed_methods = 0
     @stats.recompiles       = 0
     @stats.exits            = 0
+    @stats.entry_sp         = 0
     @compiled_iseq_addrs    = []
   end
 
@@ -74,7 +83,7 @@ class TenderJIT
     if iseq_internal.nil?
       raise ArgumentError, "expected non-nil"
     end
-    compiler = TenderJIT::Compiler.new iseq_internal
+    compiler = TenderJIT::Compiler.new iseq_internal, @stats
     jit_addr = compiler.compile cfp
 
     @compiled_iseq_addrs << compiler.iseq.to_i

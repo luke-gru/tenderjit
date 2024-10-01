@@ -29,7 +29,11 @@ class TenderJIT
     #
     def branch_not_taken
       a = false
-      1 while a
+      if a
+        true
+      else
+        nil
+      end
     end
 
     # Modified version of `branch_not_taken`, with branching taking place.
@@ -63,7 +67,11 @@ class TenderJIT
     #
     def branch_taken
       a = true
-      return 1 while a
+      if a
+        nil
+      else
+        false
+      end
     end
 
     def test_branch_not_taken
@@ -91,7 +99,7 @@ class TenderJIT
       jit.enable!
       v = branch_taken
       jit.disable!
-      assert_equal 1, v
+      assert_nil v
 
       assert_equal 1, jit.compiled_methods
       assert_equal 1, jit.executed_methods

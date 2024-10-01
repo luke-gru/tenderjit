@@ -5,6 +5,7 @@ require "tenderjit/linked_list"
 
 class TenderJIT
   class IR
+    # IR Instruction node with pointer to prev and next
     class Instruction < Util::ClassGen.pos(:op, :arg1, :arg2, :out, :bb)
       include LinkedList::Element
 
@@ -29,14 +30,6 @@ class TenderJIT
         "#<#{self.class.name} #{op} #{out} #{arg1} #{arg2}>"
       end
 
-      def put_label?
-        op == :put_label
-      end
-
-      def jump?
-        !put_label? && out.label?
-      end
-
       def replace old, new
         arg1 = @arg1 == old ? new : @arg1
         arg2 = @arg2 == old ? new : @arg2
@@ -48,6 +41,18 @@ class TenderJIT
         @arg1 = arg1
         @arg2 = arg2
         self
+      end
+
+      def comment?
+        op == :comment
+      end
+
+      def put_label?
+        op == :put_label
+      end
+
+      def jump?
+        !put_label? && out.label?
       end
 
       def return?

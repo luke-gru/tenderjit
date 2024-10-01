@@ -28,6 +28,20 @@ class TenderJIT
         def remove_use _; end
       end
 
+      class Comment < Util::ClassGen.pos(:message)
+        def register?; false; end
+        def integer?; false; end
+        def variable?; false; end
+        def none?; false; end
+        def label?; false; end
+        def to_s; "# #{@message}"; end
+        def pr; self; end
+        def definition= _; end
+        def add_use _; end
+        def unwrap; self; end
+        def remove_use _; end
+      end
+
       class Immediate < Util::ClassGen.pos(:value, :definition, :uses)
         attr_writer :definition
 

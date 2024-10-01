@@ -31,6 +31,9 @@ class TenderJIT
         @params << arg1
       end
 
+      def comment *_args
+      end
+
       def jnfalse dest, reg, _
         asm.tst reg.pr, ~Fiddle::Qnil
         asm.b dest.pr, cond: :ne

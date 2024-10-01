@@ -106,6 +106,8 @@ class TenderJIT
 
     attr_reader :insn_head, :instructions, :label_map, :locals, :local_names
 
+    # @param iseq RubyVM::RJIT::CPointer::Struct_rb_iseq_struct
+    # @param locals Array<Symbol>
     def initialize iseq, locals
       @insn_head = LinkedList::Head.new
       @instructions = @insn_head
@@ -130,12 +132,12 @@ class TenderJIT
       @insn_head.each do |insn|
         # putobject
         # pop
-        if insn.op == :putobject && insn._next.op == :pop
+        if insn.op == :putobject && insn._next&.op == :pop
           insn._next.unlink
           insn.unlink
         end
 
-        if insn.op == :jump && !insn.prev.head? && insn.prev.op == :jump
+        if insn.op == :jump && insn.prev && !insn.prev.head? && insn.prev.op == :jump
           insn.prev.unlink
         end
       end
@@ -150,11 +152,11 @@ class TenderJIT
     #    bin=96,
     #    len=2,
     #    operands=[{:decl=>"lindex_t idx", :type=>"lindex_t", :name=>"idx"}]>
-    def handle pc, insn
+    def add_rjit_instruction pc, insn
       if label = @label_map[pc]
         put_label pc, label
       end
-      send insn.name, pc, insn
+      __send__ insn.name, pc, insn
     end
 
     def dup pc, insn
@@ -345,8 +347,8 @@ class TenderJIT
       add_insn __method__, pc, insn, [label]
     end
 
-    def branchif pc, insn, ops
-      offset = ops.first
+    def branchif pc, insn
+      offset = readop(:int, pc, 0)
 
       # offset is PC + dest
       dest_pc = pc + ((offset + 2) * Fiddle::SIZEOF_VOIDP) # branchif is 2 wide

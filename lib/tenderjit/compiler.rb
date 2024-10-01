@@ -46,7 +46,7 @@ class TenderJIT
       ret
     end
 
-     def self.new iseq
+     def self.new iseq, stats
        raise ArgumentError unless iseq.respond_to?(:body)
        cov_ptr = iseq.body.variable.coverage.to_i
 
@@ -275,24 +275,28 @@ class TenderJIT
       end
     end
 
-    attr_reader :iseq, :buff, :yarv, :yarv_labels, :deferred_compiler, :patches
+    attr_reader :iseq, :buff, :yarv, :yarv_labels, :deferred_compiler, :patches, :stats
 
     # @param iseq Iseq Internal object
-    def initialize iseq
+    def initialize iseq, stats
       unless iseq.class.name =~ /Struct_rb_iseq_struct/
         raise ArgumentError
       end
       @iseq = iseq
+      @stats = stats
       @trampolines = JITBuffer.new 4096
       @buff = JITBuffer.new 4096
-      puts TRAMPOLINES2: @trampolines.to_i.to_s(16)
-      puts BUFF: @buff.to_i.to_s(16)
+      if DEBUG
+        puts TRAMPOLINES2: @trampolines.to_i.to_s(16)
+        puts BUFF: @buff.to_i.to_s(16)
+      end
       @yarv_labels = {}
       @trampoline_index = []
       @patches = []
       @patch_id = 0
       @deferred_compiler = DeferredCompiler.new(@buff)
       @yarv = nil
+      @metadata = {}
     end
 
     def yarv
@@ -302,17 +306,20 @@ class TenderJIT
     end
     alias build_yarv yarv
 
+    def method_name
+      @iseq.body.location.label
+    end
+
     def compile comptime_frame
-      # method name
       if DEBUG
-        label = @iseq.body.location.label
-        puts "COMPILING #{label}"
+        puts "COMPILING #{method_name()}"
       end
 
-      STATS.compiled_methods += 1
+      @stats.compiled_methods += 1
 
       ir = IR.new
 
+      ir.comment "ec, cfp"
       ec = ir.loadp(0)
       cfp = ir.loadp(1)
 
@@ -320,8 +327,9 @@ class TenderJIT
 
       ctx = Context.new(@buff, ec, cfp, comptime_frame)
 
+      ir.comment "increment stats"
       # Increment executed method count
-      stats_location = ir.loadi(STATS.to_i)
+      stats_location = ir.loadi(@stats.to_i)
       stat = ir.load(stats_location, ir.uimm(Stats.offsetof("executed_methods")))
       inc = ir.add(stat, ir.uimm(0x1))
       ir.store(inc, stats_location, ir.uimm(Stats.offsetof("executed_methods")))
@@ -330,27 +338,26 @@ class TenderJIT
       build_yarv unless @yarv
       cfg = @yarv.basic_blocks
 
-      translate_cfg cfg, ir, ctx
+      translate_cfg_to_ir cfg, ir, ctx
       asm = ir.assemble
 
       buff.writeable!
-      asm.write_to buff
+      asm.write_to buff, metadata: @metadata # populates metadata (comments)
 
-      disasm buff if DEBUG
+      disasm buff, metadata: @metadata if DEBUG
 
       buff.executable!
 
       if DEBUG
-        puts "DONE COMPILING #{label}"
+        puts "DONE COMPILING #{method_name()}"
       end
       buff.to_i
     end
 
     private
 
-    ##
     # Translate a CFG to IR
-    def translate_cfg bbs, ir, context
+    def translate_cfg_to_ir bbs, ir, context
       seen = {}
       worklist = [[bbs.first, context]]
       while (work = worklist.pop)
@@ -404,7 +411,7 @@ class TenderJIT
           end
         else
           seen[yarv_block] = [context.dup, ir.current_instruction]
-          translate_block yarv_block, ir, context
+          translate_block_to_ir yarv_block, ir, context
           if yarv_block.out1
             worklist.unshift [yarv_block.out1, context]
           end
@@ -416,13 +423,14 @@ class TenderJIT
       end
     end
 
-    def translate_block block, ir, context
+    def translate_block_to_ir block, ir, context
       block.each_instruction do |insn|
         puts insn.op if DEBUG
         if insn.op == :send
           raise
         else
-          send insn.op, context, ir, insn
+          # Entrypoint for IR building
+          __send__ insn.op, context, ir, insn
         end
       end
     end
@@ -437,13 +445,14 @@ class TenderJIT
     def yarv_ir iseq
       jit_pc = 0
 
-      # Size of the ISEQ buffer
+      # Size of the ISEQ buffer (Integer)
       iseq_size = iseq.body.iseq_size
 
-      # ISEQ buffer
+      # ISEQ buffer: RubyVM::RJIT::CPointer::Immediate_ULONG_LONG
       iseq_buf = iseq.body.iseq_encoded
 
       local_table_head = Fiddle.read_ptr iseq.body[:local_table].to_i, 0
+      # Array<Integer>
       list = if local_table_head == 0
         []
       else
@@ -452,14 +461,16 @@ class TenderJIT
           Fiddle::TYPE_UINTPTR_T
       end
 
+      # Array<Symbol>
       locals = list.map { Hacks.rb_id2sym _1 }
 
       @yarv = YARV.new iseq, locals
 
       while jit_pc < iseq_size
         addr = iseq_buf.to_i + (jit_pc * Fiddle::SIZEOF_VOIDP)
-        insn = INSNS.fetch C.rb_vm_insn_decode(Fiddle.read_ptr(addr, 0))
-        @yarv.handle addr, insn
+        # RubyVM::RJIT::Instruction
+        insn = RubyVM::RJIT::INSNS.fetch C.rb_vm_insn_decode(Fiddle.read_ptr(addr, 0))
+        @yarv.add_rjit_instruction addr, insn
 
         jit_pc += insn.len
       end
@@ -604,7 +615,15 @@ class TenderJIT
       label = yarv_label(ir, insn.opnds.first)
 
       temp = ctx.pop
+      ir.comment "branchunless"
       ir.jfalse temp.reg, label
+    end
+
+    def branchif ctx, ir, insn
+      label = yarv_label(ir, insn.opnds.first)
+
+      temp = ctx.pop
+      ir.jnfalse temp.reg, label
     end
 
     def dup ctx, ir, insn
@@ -751,6 +770,7 @@ class TenderJIT
     end
 
     def opt_aref ctx, ir, insn
+      ir.comment("opt_aref")
       cd = insn.opnds.first
       patch_ctx = ctx.dup
 
@@ -885,6 +905,7 @@ class TenderJIT
     end
 
     def opt_getconstant_path ctx, ir, insn
+      ir.comment("opt_getconstant_path")
       ic = insn.opnds.first
 
       exit_label = ir.label(:exit)
@@ -901,10 +922,12 @@ class TenderJIT
     end
 
     def opt_not ctx, ir, insn
+      ir.comment("opt_not")
       opt_send_without_block ctx, ir, insn
     end
 
     def opt_mod ctx, ir, insn
+      ir.comment("opt_mod")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -931,6 +954,7 @@ class TenderJIT
     end
 
     def opt_eq ctx, ir, insn
+      ir.comment("opt_eq")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -958,6 +982,7 @@ class TenderJIT
     end
 
     def putstring ctx, ir, insn
+      ir.comment("putstring \"#{insn.opnds.first}\"")
       func = ir.loadi C.rb_ec_str_resurrect
       str = ir.loadi Fiddle.dlwrap(insn.opnds.first)
       out = ir.copy ir.call(func, [ctx.ec, str])
@@ -965,6 +990,7 @@ class TenderJIT
     end
 
     def opt_neq ctx, ir, insn
+      ir.comment("opt_neq")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
       cd = insn.opnds.first
@@ -1033,6 +1059,7 @@ class TenderJIT
     end
 
     def opt_lt ctx, ir, insn
+      ir.comment("opt_lt")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -1040,18 +1067,27 @@ class TenderJIT
 
       right = r_type.reg
 
-      guard_fixnum ir, right, exit_label unless r_type.fixnum?
+      unless r_type.fixnum?
+        ir.comment("guard fixnum rtype")
+        guard_fixnum ir, right, exit_label
+      end
 
       left = l_type.reg
 
-      guard_fixnum ir, left, exit_label unless l_type.fixnum?
+      unless l_type.fixnum?
+        ir.comment("guard fixnum ltype")
+        guard_fixnum ir, left, exit_label
+      end
 
       unless l_type.fixnum? && r_type.fixnum?
         # Generate an exit
         generate_exit ctx, ir, insn.pc, exit_label
       end
 
+      ir.comment("opt_lt cmp")
       ir.cmp left, right
+      # out: TenderJIT::IR::Operands::InOut
+      ir.comment("opt_lt csel")
       out = ir.csel_lt ir.loadi(Fiddle::Qtrue), ir.loadi(Fiddle::Qfalse)
 
       ctx.pop
@@ -1060,6 +1096,7 @@ class TenderJIT
     end
 
     def opt_gt ctx, ir, insn
+      ir.comment("opt_gt")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -1087,6 +1124,7 @@ class TenderJIT
     end
 
     def opt_and ctx, ir, insn
+      ir.comment("opt_and")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -1114,6 +1152,7 @@ class TenderJIT
     end
 
     def opt_plus ctx, ir, insn
+      ir.comment("opt_plus")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -1145,6 +1184,7 @@ class TenderJIT
     end
 
     def opt_minus ctx, ir, insn
+      ir.comment("opt_minus")
       r_type = ctx.peek(0)
       l_type = ctx.peek(1)
 
@@ -1176,7 +1216,8 @@ class TenderJIT
     end
 
     def expandarray ctx, ir, insn
-      num, flag = insn.opnds
+      ir.comment("expandarray")
+      num, _flag = insn.opnds
 
       expandee = ctx.peek 0
       exit_label = ir.label(:exit)
@@ -1190,11 +1231,13 @@ class TenderJIT
 
     def setlocal ctx, ir, insn
       local = insn.opnds
+      ir.comment("setlocal #{local.name}")
       item = ctx.pop
       ctx.set_local local.name, item.type, item.reg
     end
 
     def duparray ctx, ir, insn
+      ir.comment("duparray")
       func = ir.loadi C.rb_ary_resurrect
       ary = ir.loadi insn.opnds.first.to_i
       ret = ir.call(func, [ary])
@@ -1202,6 +1245,7 @@ class TenderJIT
     end
 
     def getlocal ctx, ir, insn
+      ir.comment("getlocal")
       local = insn.opnds
       unless ctx.have_local?(local.name)
         # If the local hasn't been loaded yet, load it
@@ -1218,31 +1262,35 @@ class TenderJIT
     end
 
     def leave ctx, ir, opnds
+      ir.comment("leave")
       item = ctx.pop
 
       prev_frame = ir.add ctx.cfp, ir.uimm(C.rb_control_frame_t.size)
       ir.store(prev_frame, ctx.ec, ir.uimm(C.rb_execution_context_t.offsetof(:cfp)))
 
-      stats_location = ir.loadi(STATS.to_i)
+      stats_location = ir.loadi(@stats.to_i)
       entry_sp = ir.load(stats_location, ir.uimm(Stats.offsetof("entry_sp")))
       cont = ir.label :cont
       ir.je(entry_sp, ir.copy(ir.loadsp), cont)
       ir.brk
       ir.put_label cont
+      ir.comment("/leave")
       ir.ret item.reg
     end
 
-    def disasm buf
-      TenderJIT.disasm buf
+    def disasm buf, metadata: @metadata
+      TenderJIT.disasm buf, metadata: metadata
     end
 
     def generate_exit ctx, ir, vm_pc, exit_label
       pass = ir.label :pass
-      ir.jmp pass
+      ir.comment("exit to interpreter")
+      ir.jmp pass # pass the exit
 
       ir.put_label exit_label
 
       # load the stack pointer
+      ir.comment("exit: load sp");
       sp = ir.load(ctx.cfp, C.rb_control_frame_t.offsetof(:sp))
 
       # Flush the stack
@@ -1252,17 +1300,21 @@ class TenderJIT
       end
 
       # Store the new SP on the frame
+      ir.comment("exit: store new sp on frame");
       sp = ir.add(sp, ctx.stack_depth_b)
       ir.store(sp, ctx.cfp, C.rb_control_frame_t.offsetof(:sp))
 
       # Update the PC
+      ir.comment("exit: update the PC");
       ir.store(ir.loadi(vm_pc), ctx.cfp, C.rb_control_frame_t.offsetof(:pc))
 
-      stats_location = ir.loadi(STATS.to_i)
+      stats_location = ir.loadi(@stats.to_i)
+      ir.comment("exit: update exit stats");
       stat = ir.load(stats_location, Stats.offsetof("exits"))
       inc = ir.add(stat, 0x1)
       ir.store(inc, stats_location, Stats.offsetof("exits"))
 
+      ir.comment("exit: return Qundef to interpreter");
       ir.ret Fiddle::Qundef
       ir.put_label pass
     end

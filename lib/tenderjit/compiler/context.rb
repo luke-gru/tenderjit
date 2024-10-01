@@ -7,18 +7,18 @@ class TenderJIT
       end
 
       class StackItem < Util::ClassGen.pos(:type, :depth, :reg)
-        def depth_b; depth * Fiddle::SIZEOF_VOIDP; end
+        def depth_b; @depth * Fiddle::SIZEOF_VOIDP; end
 
         def fixnum?
-          type == :T_FIXNUM
+          @type == :T_FIXNUM
         end
 
         def symbol?
-          type == :T_SYMBOL
+          @type == :T_SYMBOL
         end
 
         def array?
-          type == :T_ARRAY
+          @type == :T_ARRAY
         end
       end
 
@@ -33,8 +33,8 @@ class TenderJIT
         @ec = ec
         @cfp = cfp
         @ep = ep
-        @stack = []
-        @locals = {}
+        @stack = [] # Array<StackItem>
+        @locals = {} # Hash<Symbol => LocalItem>
         @recv = nil
         @comptime_cfp = comptime_cfp
       end
@@ -70,6 +70,8 @@ class TenderJIT
         @stack.length
       end
 
+      # @param type Symbol
+      # @param register TenderJIT::IR::VirtualRegister
       def push type, register
         item = StackItem.new(type, @stack.length, register)
         @stack.push item

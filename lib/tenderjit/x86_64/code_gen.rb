@@ -12,8 +12,8 @@ class TenderJIT
         @params = []
       end
 
-      def write_to buffer
-        @asm.write_to buffer
+      def write_to buffer, metadata:  {}
+        @asm.write_to buffer, metadata: metadata
       end
 
       def handle insn, out, in1, in2
@@ -32,6 +32,10 @@ class TenderJIT
           asm.mov PARAM_REGS[i], pr
         end
         asm.call RAX
+      end
+
+      def comment _out, arg1, _arg2
+        @asm.comment arg1.message
       end
 
       def neg out, arg1, _

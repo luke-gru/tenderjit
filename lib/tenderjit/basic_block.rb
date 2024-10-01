@@ -362,10 +362,10 @@ class TenderJIT
     def each_instruction
       return enum_for(:each_instruction) unless block_given?
 
-      node = start
+      node = @start
       loop do
         yield node
-        break if node == finish
+        break if node == @finish
         node = node._next
       end
     end
