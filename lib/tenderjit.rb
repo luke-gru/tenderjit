@@ -40,7 +40,7 @@ class TenderJIT
 
   STATS = Stats.malloc(Fiddle::RUBY_FREE)
 
-  def self.disasm buf, metadata: {}
+  def self.disasm buf, start_pos: 0, num_bytes: buf.pos, metadata: {}
     comments_map = metadata[:comments] || {}
     hs = case Util::PLATFORM
          when :arm64
@@ -52,11 +52,14 @@ class TenderJIT
          end
 
     # Now disassemble the instructions with Hatstone
-    hs.disasm(buf[0, buf.pos], buf.to_i).each do |insn|
+    hs.disasm(buf[start_pos, num_bytes], buf.to_i).each do |insn|
       # insn: Hatstone::Insn
-      offset = insn.address - buf.to_i
+      offset = start_pos + (insn.address - buf.to_i)
       if message = comments_map[offset]
-        puts "# " + message
+        lines = message.lines.each(&:chomp)
+        lines.each do |line|
+          puts "# #{line}"
+        end
       end
       puts "%#05x %s %s" % [insn.address, insn.mnemonic, insn.op_str]
     end

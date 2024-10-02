@@ -10,14 +10,18 @@ class TenderJIT
     include RubyVM::RJIT
 
     def self.for_method method
-      raise TypeError unless Method === method
+      unless Method === method
+        raise TypeError, "Expected Method|UnboundMethod, got #{method.class}"
+      end
       rb_iseq = RubyVM::InstructionSequence.of(method)
       return unless rb_iseq # it's a C func
       new method_to_iseq_t(method)
     end
 
     def self.uncompile method
-      raise TypeError unless Method === method
+      unless Method === method || UnboundMethod === method
+        raise TypeError, "Expected Method|UnboundMethod, got #{method.class}"
+      end
       rb_iseq = RubyVM::InstructionSequence.of(method)
       return unless rb_iseq # it's a C func
 
@@ -32,7 +36,7 @@ class TenderJIT
     end
 
     def self.method_to_iseq_t method
-      if Method === method
+      if Method === method || UnboundMethod === method
         iseq_obj = RubyVM::InstructionSequence.of(method)
         return if method.nil?
       else
@@ -280,7 +284,7 @@ class TenderJIT
     # @param iseq Iseq Internal object
     def initialize iseq, stats
       unless iseq.class.name =~ /Struct_rb_iseq_struct/
-        raise ArgumentError
+        raise ArgumentError, "expected rb_iseq_struct, got: #{iseq.class.name}"
       end
       @iseq = iseq
       @stats = stats
@@ -301,7 +305,7 @@ class TenderJIT
 
     def yarv
       return @yarv if @yarv
-      yarv_ir(@iseq)
+      build_yarv_insns(@iseq)
       @yarv
     end
     alias build_yarv yarv
@@ -339,19 +343,20 @@ class TenderJIT
       cfg = @yarv.basic_blocks
 
       translate_cfg_to_ir cfg, ir, ctx
+      # asm: TenderJIT::{arch}::CodeGen
       asm = ir.assemble
 
-      buff.writeable!
-      asm.write_to buff, metadata: @metadata # populates metadata (comments)
+      @buff.writeable!
+      asm.write_to @buff, metadata: @metadata # populates metadata (comments)
 
-      disasm buff, metadata: @metadata if DEBUG
+      disasm @buff, metadata: @metadata if DEBUG
 
-      buff.executable!
+      @buff.executable!
 
       if DEBUG
         puts "DONE COMPILING #{method_name()}"
       end
-      buff.to_i
+      @buff.to_i
     end
 
     private
@@ -442,7 +447,7 @@ class TenderJIT
       context.pop
     end
 
-    def yarv_ir iseq
+    def build_yarv_insns iseq
       jit_pc = 0
 
       # Size of the ISEQ buffer (Integer)
@@ -481,33 +486,38 @@ class TenderJIT
     end
 
     def gen_iv_read recv, patch_id
-      patch_ctx = @patches[patch_id]
+      patch_ctx = @patches[patch_id] # PatchIVRead
 
       ir = IR.new
       self_reg = ir.loadp 0
       iv_id = patch_ctx.iv_id
+      iv_sym = Hacks.rb_id2sym(iv_id)
 
       case Hacks.basic_type(recv)
       when :T_OBJECT
         shape_id = C.rb_shape_get_shape_id(recv)
         index = C.rb_shape_get_iv_index(shape_id, patch_ctx.iv_id)
 
+        ir.comment "test the T_OBJECT shape for ivar #{iv_sym} againt comptime shape"
         flags = ir.load self_reg, C.RBasic.offsetof(:flags)
         shape_reg = ir.shr flags, ir.imm(32)
 
         read = ir.label :read
-        # If the shapes are the same, great we'll ccontinue
+        # If the shapes are the same, great we'll continue
         ir.je(shape_reg, ir.uimm(shape_id), read)
 
+        ir.comment "recompile iv read (stub)"
         # Otherwise we need to recompile, so add a stub here
         func = patched_loadi(ir, ->(patch_id) { read_iv_trampoline(patch_id) },
-                                 ->(loc, opnd) { PatchIVRead.new(iv_id, loc, opnd.copy) })
+                                 ->(loc, opnd) { PatchIVRead.new(iv_sym, loc, opnd.copy) })
         ir.ret(ir.call(func, [self_reg]))
 
         ir.put_label read
         val = if C.FL_TEST_RAW(recv, C::ROBJECT_EMBED)
+          ir.comment("read embedded object ivar: #{iv_sym}")
           ir.load(self_reg, C.RObject.offsetof(:as, :ary) + (index * C.VALUE.size))
         else
+          ir.comment("read extended object's ivar: #{iv_sym}")
           iv_tbl = ir.load(self_reg, C.RObject.offsetof(:as, :heap, :ivptr))
           ir.load(iv_tbl, index * C.VALUE.size)
         end
@@ -517,25 +527,35 @@ class TenderJIT
       end
 
       asm = ir.assemble
-      entry = buff.pos + buff.to_i
-      buff.writeable!
-      asm.write_to buff
-      buff.executable!
+      old_pos = @buff.pos
+      entry = @buff.pos + @buff.to_i
+      @buff.writeable!
+      asm.write_to @buff, metadata: @metadata
+      end_pos = @buff.pos
+      @buff.executable!
+
+      if DEBUG
+        puts "Runtime disasm for gen_iv_read"
+        disasm @buff, start_pos: old_pos, num_bytes: end_pos-old_pos, metadata: @metadata
+        puts "/Runtime disasm for gen_iv_read"
+      end
 
       ir = IR.new
       ir.storei(entry, patch_ctx.reg)
       asm = ir.assemble_patch
 
+      # write the patched address to the jitbuffer
       pos = buff.pos
-      buff.seek patch_ctx.buffer_offset
-      buff.writeable!
-      asm.write_to(buff)
-      buff.executable!
-      buff.seek pos
+      @buff.seek patch_ctx.buffer_offset
+      @buff.writeable!
+      asm.write_to @buff, metadata: @metadata
+      @buff.executable!
+      @buff.seek pos
 
       entry
     end
 
+    # @return Integer, address of 'gen_iv_read' trampoline location
     def read_iv_trampoline patch_id
       ir = IR.new
       recv = ir.copy ir.loadp 0
@@ -545,9 +565,9 @@ class TenderJIT
 
       argv = ir.copy(ir.loadsp)
       func = ir.loadi Hacks::FunctionPointers.rb_funcallv
-      zelf = ir.loadi Fiddle.dlwrap(self)
+      _self = ir.loadi Fiddle.dlwrap(self)
       callback = ir.loadi Hacks.rb_intern_str(callback)
-      res = ir.num2int ir.call(func, [zelf, callback, ir.loadi(2), argv])
+      res = ir.num2int ir.call(func, [_self, callback, ir.loadi(2), argv])
 
       ir.pop
       ir.ret ir.call(res, [recv])
@@ -557,6 +577,8 @@ class TenderJIT
       @trampolines.writeable!
       asm.write_to @trampolines
       @trampolines.executable!
+
+      # TODO: add DEBUG disasm
       addr
     end
 
@@ -567,6 +589,7 @@ class TenderJIT
       self_reg = if ctx.recv
         ctx.recv
       else
+        ir.comment "load self"
         ctx.recv = ir.load(ctx.cfp, ir.uimm(C.rb_control_frame_t.offsetof(:self)))
         ctx.recv
       end
@@ -575,23 +598,28 @@ class TenderJIT
 
       case Hacks.basic_type(recv)
       when :T_OBJECT
+        ir.comment "patched loadi"
         func = patched_loadi(ir, ->(patch_id) { read_iv_trampoline(patch_id) },
                                  ->(loc, opnd) { PatchIVRead.new(iv_id, loc, opnd.copy) })
 
         params = [self_reg]
+        ir.comment "call gen_iv_read trampoline"
         ctx.push :unknown, ir.copy(ir.call(func, params))
       else
-        raise NotImplementedError
+        raise NotImplementedError, "only T_OBJECT objects are implemented"
       end
     end
 
+    # @return register (TenderJIT::IR::Operands::InOut) containing the address of
+    # the function to read the instance variable
     def patched_loadi ir, before_assembly, at_assembly
       patch_id = @patch_id
       address = before_assembly.call(patch_id)
       func = nil
       ir.patch_location { |loc| @patches[patch_id] = at_assembly.call(loc, func) }
       @patch_id += 1
-      func = ir.loadi ir.uimm(address, 64)
+      ir.comment "load gen_iv_read trampoline address"
+      func = ir.loadi ir.uimm(address, 64) # func: TenderJIT::IR::Operands::InOut
       func
     end
 
@@ -1278,8 +1306,8 @@ class TenderJIT
       ir.ret item.reg
     end
 
-    def disasm buf, metadata: @metadata
-      TenderJIT.disasm buf, metadata: metadata
+    def disasm buf, start_pos: 0, num_bytes: buf.pos, metadata: @metadata
+      TenderJIT.disasm buf, start_pos: start_pos, num_bytes: num_bytes, metadata: metadata
     end
 
     def generate_exit ctx, ir, vm_pc, exit_label

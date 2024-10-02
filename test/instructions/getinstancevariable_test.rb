@@ -35,26 +35,28 @@ class TenderJIT
     def test_getinstancevariable_embedded
       foo = Foo.new
       compile(Foo.instance_method(:read), recv: foo)
-      jit.enable!
+      @jit.enable!
       v = foo.read
-      jit.disable!
+      @jit.disable!
       assert_equal "a", v
-      assert_equal 0, jit.exits
+      assert_equal 1, @jit.executed_methods
+      assert_equal 0, @jit.exits
     ensure
-      jit.uncompile(Foo.instance_method(:read))
+      @jit.uncompile(Foo.instance_method(:read))
     end
 
     def test_getinstancevariable_extended
       foo = Foo.new
       compile(Foo.instance_method(:read), recv: foo)
       foo.expand
-      jit.enable!
+      @jit.enable!
       v = foo.read
-      jit.disable!
+      @jit.disable!
       assert_equal "a", v
-      assert_equal 0, jit.exits
+      assert_equal 1, @jit.executed_methods
+      assert_equal 0, @jit.exits
     ensure
-      jit.uncompile(Foo.instance_method(:read))
+      @jit.uncompile(Foo.instance_method(:read))
     end
 
     def test_getinstancevariable_subclass
@@ -63,27 +65,29 @@ class TenderJIT
       Parent.new.read # populate the iv table
 
       foo = Subclass.new
-      jit.enable!
+      @jit.enable!
       v = foo.read
-      jit.disable!
+      @jit.disable!
       assert_equal 10, v
-      assert_equal 0, jit.exits
+      assert_equal 1, @jit.executed_methods
+      assert_equal 0, @jit.exits
     ensure
-      jit.uncompile(Foo.instance_method(:read))
+      @jit.uncompile(Foo.instance_method(:read))
     end
 
     def test_shape_changes
       foo = Foo.new
       compile(Foo.instance_method(:read), recv: foo)
-      jit.enable!
+      @jit.enable!
       foo.read # ensure the stub is hit
       foo.expand
       v = foo.read # shape is different
-      jit.disable!
+      @jit.disable!
       assert_equal "a", v
-      assert_equal 0, jit.exits
+      assert_equal 2, @jit.executed_methods
+      assert_equal 0, @jit.exits
     ensure
-      jit.uncompile(Foo.instance_method(:read))
+      @jit.uncompile(Foo.instance_method(:read))
     end
   end
 end

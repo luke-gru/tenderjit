@@ -100,6 +100,7 @@ class TenderJIT
         @block = nil
       end
 
+      # @param cg {arch}::CodeGen
       def call cg, out, in1, in2
         cg.patch_location @block, in1, in2
       end

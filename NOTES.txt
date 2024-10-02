@@ -9,6 +9,11 @@ Passing tests:
 dup
 leave
 jump
+branchunless
+branchif
+getinstancevariable (for Objects)
+
+Looking at:
 
 Crashing tests:
 duparray
@@ -32,14 +37,14 @@ TenderJIT#compile:
      Yarv.new(iseq_i, locals) # now append to @yarv.@instructions
      ~ foreach addr in iseq_i.insn_addrs
        ~ insn = INSNS.fetch(...) 
-       * yarv.handle(addr, insn)
+       * yarv.add_rjit_instruction(addr, insn)
 
 5) getlocal_WC_0(addr, insn)
      add_insn :getlocal
        new_insn
          Instruction.new(name, pcs, insn, opnds)
        @instructions.append(insn)
-       / yarv.handle, @yarv.@instructions now full
+       / yarv.add_rjit_instruction, @yarv.@instructions now full
 
 6) cfg = @yarv.basic_blocks
      BasicBlock.build @insn_head, self, false

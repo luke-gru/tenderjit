@@ -25,13 +25,13 @@ class TenderJIT
       end
 
       def call _, location, params
-        asm.mov RAX, location.pr
+        @asm.mov RAX, location.pr
         params.each_with_index do |param, i|
           pr = param.pr
           next if pr == PARAM_REGS[i]
-          asm.mov PARAM_REGS[i], pr
+          @asm.mov PARAM_REGS[i], pr
         end
-        asm.call RAX
+        @asm.call RAX
       end
 
       def comment _out, arg1, _arg2
@@ -112,7 +112,7 @@ class TenderJIT
       end
 
       def patch_location block, _, _
-        asm.lazy(&block)
+        @asm.lazy(&block)
       end
 
       PARAM_REGS = [

@@ -192,17 +192,17 @@ class TenderJIT
 
     def add_phi phi
       phi.unlink
-      start.append phi
+      @start.append phi
     end
 
     def phis
       phis = []
-      iter = start
+      iter = @start
       loop do
         if iter.op == :phi
           phis << iter
         end
-        break if iter == finish
+        break if iter == @finish
         iter = iter._next
       end
       phis.freeze
@@ -216,7 +216,7 @@ class TenderJIT
     end
 
     def execution_frequency
-      if labeled_entry? && start.label.name == :exit
+      if labeled_entry? && @start.label.name == :exit
         0.2
       else
         1
@@ -301,7 +301,7 @@ class TenderJIT
 
     def add_jump ir, label
       raise ArgumentError unless label
-      add_instruction ir.insert_jump(finish, label)
+      add_instruction ir.insert_jump(@finish, label)
     end
 
     def remove_predecessor block
@@ -320,7 +320,7 @@ class TenderJIT
     end
 
     def empty?
-      start == finish && start.unconditional_jump?
+      @start == @finish && @start.unconditional_jump?
     end
 
     ###
@@ -373,48 +373,48 @@ class TenderJIT
     def reverse_each_instruction
       return enum_for(:reverse_each_instruction) unless block_given?
 
-      node = finish
+      node = @finish
       loop do
         yield node
-        break if node == start
+        break if node == @start
         node = node.prev
       end
     end
 
     def falls_through?
-      !(finish.unconditional_jump? || finish.return?)
+      !(@finish.unconditional_jump? || @finish.return?)
     end
 
     def has_jump_target?
-      finish.has_jump_target?
+      @finish.has_jump_target?
     end
 
     def jumps?
-      finish.jump?
+      @finish.jump?
     end
 
     def returns?
-      finish.return?
+      @finish.return?
     end
 
     def calls?
-      finish.call?
+      @finish.call?
     end
 
     def jump_target_label
-      finish.target_label
+      @finish.target_label
     end
 
     def labeled_entry?
-      start.put_label?
+      @start.put_label?
     end
 
     def label
-      start.label
+      @start.label
     end
 
     def successors
-      [out1, out2].compact
+      [@out1, @out2].compact
     end
 
     private
