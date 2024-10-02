@@ -80,7 +80,7 @@ class TenderJIT
 
       def assemble platform = Util::PLATFORM
         assign_registers platform
-        if DEBUG
+        if DEBUG && DEBUG > 1
           $stderr.print "#" * 10
           $stderr.print " AFTER RA "
           $stderr.puts "#" * 10

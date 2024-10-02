@@ -10,7 +10,7 @@ class TenderJIT
     # turn off rjit
     C.rjit_cancel_all("because") if defined?(TenderJIT::C)
   end
-  DEBUG = ENV['TENDERJIT_DEBUG'] ? ENV['TENDERJIT_DEBUG'].to_i != 0 : false
+  DEBUG = ENV['TENDERJIT_DEBUG'] ? ENV['TENDERJIT_DEBUG'].to_i : false
 end
 
 require "tenderjit/fiddle_hacks"
@@ -25,6 +25,7 @@ require "ruby_vm/rjit/c_type"
 require "ruby_vm/rjit/c_pointer"
 require "ruby_vm/rjit/compiler"
 
+# Top-level driver class that can compile 1 or multiple methods and can enable or disable the jit
 class TenderJIT
   INSNS = RubyVM::RJIT.const_get(:INSNS)
 
@@ -61,7 +62,7 @@ class TenderJIT
           puts "# #{line}"
         end
       end
-      puts "%#05x %s %s" % [insn.address, insn.mnemonic, insn.op_str]
+      puts "%04d: %#05x %s %s" % [offset, insn.address + start_pos, insn.mnemonic, insn.op_str]
     end
   end
 

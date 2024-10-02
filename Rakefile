@@ -10,7 +10,7 @@ test_files = RubyVM::INSTRUCTION_NAMES.grep_v(/^trace_/).each_with_object([]) do
   next if name == 'reverse'
 
   test_file = "test/instructions/#{name}_test.rb"
-  file test_file do |t|
+  file test_file do |t| # if it doesn't exist, create it
     File.open(test_file, "w") do |f|
       f.write <<~eorb
 # frozen_string_literal: true

@@ -21,6 +21,18 @@ duparray
 Old tests:
 getglobal
 
+Tenderlove's Videos
+===================
+Streamed live on Oct 22, 2021
+He worked on opt_aset for arrays
+https://www.youtube.com/watch?v=JGHD3AO8cVA&ab_channel=Tenderlove%27sCoolStuff
+
+Streamed live on Dec 3, 2021
+He showed asmrepl and worked on expandarray for extended arrays that are long enough
+The compiler didn't seem to be doing lazy BBV yet, or any lazy compiling
+https://www.youtube.com/watch?v=ldyiSqLrdAg&t=2940s&ab_channel=Tenderlove%27sCoolStuff
+
+
 TenderJIT#compile:
 1) compile method(:foo)
 
